@@ -16,7 +16,12 @@ const projectRoot = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 8788);
 
+app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
+app.use("/api", (_request, response, next) => {
+  response.setHeader("Cache-Control", "no-store");
+  next();
+});
 
 function expectedAccessToken() {
   return String(process.env.APP_ACCESS_TOKEN || "").trim();
