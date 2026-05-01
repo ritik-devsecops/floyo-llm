@@ -38,6 +38,8 @@ import remarkGfm from "remark-gfm";
 const SETTINGS_STORAGE_KEY = "floyo-llm-codex-settings";
 const CONVERSATIONS_STORAGE_KEY = "floyo-llm-codex-conversations";
 const ACCESS_TOKEN_STORAGE_KEY = "floyo-llm-codex-access-token";
+const ACCESS_ACCOUNT_STORAGE_KEY = "floyo-llm-codex-access-account";
+const DEFAULT_ACCOUNT_ID = "guest";
 const FLOYO_ACCESS_INSTRUCTIONS_URL =
   "https://shared.archbee.space/public/PREVIEW-WejOAlhAmyJ3PP37IK_LR/PREVIEW-eANCv0feHV1nQbGY0KMmo";
 const LEGACY_DEFAULT_SYSTEM_PROMPT =
@@ -228,9 +230,17 @@ function readSavedSettings() {
   }
 }
 
-function readSavedConversations() {
+function conversationStorageKey(accountId = DEFAULT_ACCOUNT_ID) {
+  return `${CONVERSATIONS_STORAGE_KEY}:${accountId || DEFAULT_ACCOUNT_ID}`;
+}
+
+function readSavedConversations(accountId = DEFAULT_ACCOUNT_ID) {
   try {
-    const saved = JSON.parse(localStorage.getItem(CONVERSATIONS_STORAGE_KEY) || "[]");
+    const key = conversationStorageKey(accountId);
+    let saved = JSON.parse(localStorage.getItem(key) || "[]");
+    if ((!Array.isArray(saved) || saved.length === 0) && accountId === DEFAULT_ACCOUNT_ID) {
+      saved = JSON.parse(localStorage.getItem(CONVERSATIONS_STORAGE_KEY) || "[]");
+    }
     if (!Array.isArray(saved) || saved.length === 0) {
       return [createConversation()];
     }
@@ -247,12 +257,30 @@ function readSavedConversations() {
   }
 }
 
+function readSavedAccessAccount() {
+  try {
+    return localStorage.getItem(ACCESS_ACCOUNT_STORAGE_KEY) || DEFAULT_ACCOUNT_ID;
+  } catch {
+    return DEFAULT_ACCOUNT_ID;
+  }
+}
+
 function readSavedAccessToken() {
   try {
     return localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY) || "";
   } catch {
     return "";
   }
+}
+
+function readInitialAccessState() {
+  const accountId = readSavedAccessAccount();
+  const conversations = readSavedConversations(accountId);
+  return {
+    accountId,
+    conversations,
+    activeConversationId: conversations[0]?.id,
+  };
 }
 
 async function apiRequest(path, options = {}, accessToken = "") {
@@ -924,12 +952,14 @@ function AdvancedPanel({
 }
 
 export default function App() {
+  const initialAccessState = useMemo(readInitialAccessState, []);
   const [config, setConfig] = useState(null);
   const [models, setModels] = useState(FALLBACK_MODELS);
   const [settings, setSettings] = useState(readSavedSettings);
   const [activePreset, setActivePreset] = useState("codex");
-  const [conversations, setConversations] = useState(readSavedConversations);
-  const [activeConversationId, setActiveConversationId] = useState(() => conversations[0]?.id);
+  const [accessAccountId, setAccessAccountId] = useState(initialAccessState.accountId);
+  const [conversations, setConversations] = useState(initialAccessState.conversations);
+  const [activeConversationId, setActiveConversationId] = useState(initialAccessState.activeConversationId);
   const [draft, setDraft] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -978,12 +1008,27 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
-  }, [conversations]);
+    localStorage.setItem(conversationStorageKey(accessAccountId), JSON.stringify(conversations));
+  }, [accessAccountId, conversations]);
 
   useEffect(() => {
     localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
   }, [accessToken]);
+
+  useEffect(() => {
+    localStorage.setItem(ACCESS_ACCOUNT_STORAGE_KEY, accessAccountId || DEFAULT_ACCOUNT_ID);
+  }, [accessAccountId]);
+
+  const loadAccountConversations = useCallback((accountId) => {
+    const nextConversations = readSavedConversations(accountId);
+    setConversations(nextConversations);
+    setActiveConversationId(nextConversations[0]?.id);
+    setDraft("");
+    setEditingMessageId("");
+    setEditingText("");
+    setLastRun(null);
+    setWorkflowPreview(null);
+  }, []);
 
   const verifyAccessToken = useCallback(async (tokenValue) => {
     const nextToken = String(tokenValue || "").trim();
@@ -997,7 +1042,7 @@ export default function App() {
     setAccessDenied(false);
 
     try {
-      await apiRequest(
+      const verification = await apiRequest(
         "/api/access/verify",
         {
           method: "POST",
@@ -1005,7 +1050,12 @@ export default function App() {
         },
         nextToken,
       );
+      const nextAccountId = verification.accountId || DEFAULT_ACCOUNT_ID;
       setAccessToken(nextToken);
+      setAccessAccountId(nextAccountId);
+      if (nextAccountId !== accessAccountId) {
+        loadAccountConversations(nextAccountId);
+      }
       setAccessVerified(true);
       return true;
     } catch (error) {
@@ -1015,7 +1065,7 @@ export default function App() {
     } finally {
       setIsCheckingAccess(false);
     }
-  }, []);
+  }, [accessAccountId, loadAccountConversations]);
 
   useEffect(() => {
     if (!config) {
@@ -1043,8 +1093,13 @@ export default function App() {
       },
       accessToken,
     )
-      .then(() => {
+      .then((verification) => {
         if (!isCancelled) {
+          const nextAccountId = verification.accountId || DEFAULT_ACCOUNT_ID;
+          setAccessAccountId(nextAccountId);
+          if (nextAccountId !== accessAccountId) {
+            loadAccountConversations(nextAccountId);
+          }
           setAccessVerified(true);
         }
       })
@@ -1063,7 +1118,7 @@ export default function App() {
     return () => {
       isCancelled = true;
     };
-  }, [accessToken, config, requiresAccessToken]);
+  }, [accessAccountId, accessToken, config, loadAccountConversations, requiresAccessToken]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });

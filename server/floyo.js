@@ -103,14 +103,13 @@ export async function validateFloyoApiKey(apiKey) {
     return { ok: false };
   }
 
-  for (const apiBaseUrl of candidateApiBaseUrls()) {
-    try {
-      const result = await probeApiKeyOnBase(token, apiBaseUrl);
-      if (result.ok) {
-        return result;
-      }
-    } catch {
-      // Try the next known Floyo API base URL.
+  const results = await Promise.allSettled(
+    candidateApiBaseUrls().map((apiBaseUrl) => probeApiKeyOnBase(token, apiBaseUrl)),
+  );
+
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.ok) {
+      return result.value;
     }
   }
 
