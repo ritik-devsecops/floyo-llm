@@ -293,15 +293,20 @@ function StatusPill({ config }) {
   );
 }
 
-function AccessGate({ accessToken, setAccessToken, accessDenied }) {
+function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAccessToken }) {
+  const [draftToken, setDraftToken] = useState(accessToken);
+
+  useEffect(() => {
+    setDraftToken(accessToken);
+  }, [accessToken]);
+
   return (
     <div className="access-gate" role="dialog" aria-modal="true" aria-label="Floyo app access">
       <form
         className="access-card"
         onSubmit={(event) => {
           event.preventDefault();
-          const formData = new FormData(event.currentTarget);
-          setAccessToken(String(formData.get("accessToken") || "").trim());
+          onVerifyAccessToken(draftToken);
         }}
       >
         <div className="access-mark">
@@ -314,9 +319,18 @@ function AccessGate({ accessToken, setAccessToken, accessDenied }) {
             Setup instructions
           </a>
         </p>
-        <input name="accessToken" type="password" defaultValue={accessToken} placeholder="Enter access token" autoFocus />
+        <input
+          name="accessToken"
+          type="password"
+          value={draftToken}
+          placeholder="Enter access token"
+          onChange={(event) => setDraftToken(event.target.value)}
+          autoFocus
+        />
         {accessDenied ? <span className="access-error">Invalid token. Check the token and try again.</span> : null}
-        <button type="submit">Unlock FloyoGPT</button>
+        <button type="submit" disabled={!draftToken.trim() || isCheckingAccess}>
+          {isCheckingAccess ? "Checking..." : "Unlock FloyoGPT"}
+        </button>
       </form>
     </div>
   );
@@ -926,6 +940,8 @@ export default function App() {
   const [editingText, setEditingText] = useState("");
   const [accessToken, setAccessToken] = useState(readSavedAccessToken);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [accessVerified, setAccessVerified] = useState(false);
+  const [isCheckingAccess, setIsCheckingAccess] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const modelOptions = models?.length ? models : FALLBACK_MODELS;
@@ -941,7 +957,7 @@ export default function App() {
   );
   const isEmptyChat = visibleMessages.length === 0;
   const requiresAccessToken = Boolean(config?.requiresAccessToken);
-  const isAccessLocked = requiresAccessToken && (!accessToken.trim() || accessDenied);
+  const isAccessLocked = requiresAccessToken && !accessVerified;
 
   useEffect(() => {
     apiRequest("/api/config")
@@ -967,8 +983,87 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
-    setAccessDenied(false);
   }, [accessToken]);
+
+  const verifyAccessToken = useCallback(async (tokenValue) => {
+    const nextToken = String(tokenValue || "").trim();
+    if (!nextToken) {
+      setAccessVerified(false);
+      setAccessDenied(true);
+      return false;
+    }
+
+    setIsCheckingAccess(true);
+    setAccessDenied(false);
+
+    try {
+      await apiRequest(
+        "/api/access/verify",
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        nextToken,
+      );
+      setAccessToken(nextToken);
+      setAccessVerified(true);
+      return true;
+    } catch (error) {
+      setAccessVerified(false);
+      setAccessDenied(true);
+      return false;
+    } finally {
+      setIsCheckingAccess(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!config) {
+      return undefined;
+    }
+    if (!requiresAccessToken) {
+      setAccessVerified(true);
+      setAccessDenied(false);
+      return undefined;
+    }
+    if (!accessToken.trim()) {
+      setAccessVerified(false);
+      return undefined;
+    }
+
+    let isCancelled = false;
+    setIsCheckingAccess(true);
+    setAccessDenied(false);
+
+    apiRequest(
+      "/api/access/verify",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+      accessToken,
+    )
+      .then(() => {
+        if (!isCancelled) {
+          setAccessVerified(true);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setAccessVerified(false);
+          setAccessDenied(true);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsCheckingAccess(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [accessToken, config, requiresAccessToken]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1170,6 +1265,7 @@ export default function App() {
     } catch (error) {
       window.clearTimeout(processingTimer);
       if (error.status === 401) {
+        setAccessVerified(false);
         setAccessDenied(true);
       }
       updateActiveMessages((current) =>
@@ -1445,7 +1541,12 @@ export default function App() {
       />
 
       {isAccessLocked ? (
-        <AccessGate accessToken={accessToken} setAccessToken={setAccessToken} accessDenied={accessDenied} />
+        <AccessGate
+          accessToken={accessToken}
+          accessDenied={accessDenied}
+          isCheckingAccess={isCheckingAccess}
+          onVerifyAccessToken={verifyAccessToken}
+        />
       ) : null}
 
       {notice ? <div className="toast">{notice}</div> : null}

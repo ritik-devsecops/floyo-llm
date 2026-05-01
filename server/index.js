@@ -27,6 +27,25 @@ function expectedAccessToken() {
   return String(process.env.APP_ACCESS_TOKEN || "").trim();
 }
 
+function configuredFloyoApiKey() {
+  const apiKey = String(process.env.FLOYO_API_KEY || "").trim();
+  return apiKey && apiKey !== "YOUR_FLOYO_API_KEY" ? apiKey : "";
+}
+
+function tokenMatchesExpectedAccessToken(token) {
+  const expectedToken = expectedAccessToken();
+  return Boolean(expectedToken && timingSafeEquals(token, expectedToken));
+}
+
+function tokenMatchesConfiguredFloyoApiKey(token) {
+  const apiKey = configuredFloyoApiKey();
+  return Boolean(apiKey && timingSafeEquals(token, apiKey));
+}
+
+function tokenIsAllowed(token) {
+  return tokenMatchesExpectedAccessToken(token) || tokenMatchesConfiguredFloyoApiKey(token);
+}
+
 function timingSafeEquals(left, right) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -47,14 +66,15 @@ function providedAccessToken(request) {
 }
 
 function requireAppAccess(request, response, next) {
-  const expectedToken = expectedAccessToken();
   const shouldRequireToken = Boolean(process.env.VERCEL || process.env.NODE_ENV === "production");
+  const hasConfiguredAccess = Boolean(expectedAccessToken() || configuredFloyoApiKey());
+  const token = providedAccessToken(request);
 
-  if (!expectedToken) {
+  if (!hasConfiguredAccess) {
     if (shouldRequireToken) {
       response.status(503).json({
         error: "Access token not configured",
-        message: "APP_ACCESS_TOKEN is required before the deployed API can run Floyo workflows.",
+        message: "APP_ACCESS_TOKEN or a Floyo API key is required before the deployed API can run Floyo workflows.",
       });
       return;
     }
@@ -62,10 +82,10 @@ function requireAppAccess(request, response, next) {
     return;
   }
 
-  if (!timingSafeEquals(providedAccessToken(request), expectedToken)) {
+  if (!token || !tokenIsAllowed(token)) {
     response.status(401).json({
       error: "Unauthorized",
-      message: "Enter the app access token to run Floyo workflows.",
+      message: token ? "Invalid access token." : "Enter the app access token to run Floyo workflows.",
     });
     return;
   }
@@ -107,6 +127,31 @@ app.get("/api/config", (_request, response) => {
     defaults: DEFAULT_OPTIONS,
     models: LLM_MODELS,
   });
+});
+
+app.post("/api/access/verify", async (request, response, next) => {
+  try {
+    const token = providedAccessToken(request);
+    if (!token) {
+      response.status(401).json({
+        error: "Unauthorized",
+        message: "Enter the app access token to run Floyo workflows.",
+      });
+      return;
+    }
+
+    if (tokenIsAllowed(token)) {
+      response.json({ ok: true });
+      return;
+    }
+
+    response.status(401).json({
+      error: "Unauthorized",
+      message: "Invalid access token.",
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/workflow/preview", requireAppAccess, (request, response, next) => {
