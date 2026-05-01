@@ -38,6 +38,8 @@ import remarkGfm from "remark-gfm";
 const SETTINGS_STORAGE_KEY = "floyo-llm-codex-settings";
 const CONVERSATIONS_STORAGE_KEY = "floyo-llm-codex-conversations";
 const ACCESS_TOKEN_STORAGE_KEY = "floyo-llm-codex-access-token";
+const FLOYO_ACCESS_INSTRUCTIONS_URL =
+  "https://shared.archbee.space/public/PREVIEW-WejOAlhAmyJ3PP37IK_LR/PREVIEW-eANCv0feHV1nQbGY0KMmo";
 const LEGACY_DEFAULT_SYSTEM_PROMPT =
   "You are Floyo Codex, a precise coding and multimodal assistant. Answer directly, keep code runnable, and mention assumptions when needed.";
 
@@ -305,10 +307,15 @@ function AccessGate({ accessToken, setAccessToken, accessDenied }) {
         <div className="access-mark">
           <Check size={22} />
         </div>
-        <h2>Floyo access token</h2>
-        <p>Production API protected hai. Floyo workflows run karne ke liye app access token enter karo.</p>
-        <input name="accessToken" type="password" defaultValue={accessToken} placeholder="Enter app access token" autoFocus />
-        {accessDenied ? <span className="access-error">Token invalid hai. Correct token try karo.</span> : null}
+        <h2>FloyoGPT access</h2>
+        <p>
+          To use FloyoGPT, generate an app access token from the Floyo panel, then enter it here.{" "}
+          <a href={FLOYO_ACCESS_INSTRUCTIONS_URL} target="_blank" rel="noreferrer">
+            Setup instructions
+          </a>
+        </p>
+        <input name="accessToken" type="password" defaultValue={accessToken} placeholder="Enter access token" autoFocus />
+        {accessDenied ? <span className="access-error">Invalid token. Check the token and try again.</span> : null}
         <button type="submit">Unlock FloyoGPT</button>
       </form>
     </div>

@@ -1475,6 +1475,17 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.access-card a {
+  color: #f4f4f4;
+  font-weight: 760;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.access-card a:hover {
+  color: #ffffff;
+}
+
 .access-card input {
   width: 100%;
   border-color: #4a4a4a;
