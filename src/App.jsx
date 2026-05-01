@@ -321,7 +321,7 @@ function StatusPill({ config }) {
   );
 }
 
-function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAccessToken }) {
+function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAccessToken, onCancel }) {
   const [draftToken, setDraftToken] = useState(accessToken);
 
   useEffect(() => {
@@ -342,7 +342,7 @@ function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAcces
         </div>
         <h2>FloyoGPT access</h2>
         <p>
-          To use FloyoGPT, enter a valid Floyo API key or app access token. Generate a Floyo API key from the Floyo panel.{" "}
+          Enter a valid Floyo API key or app access token to continue this request. Generate a Floyo API key from the Floyo panel.{" "}
           <a href={FLOYO_ACCESS_INSTRUCTIONS_URL} target="_blank" rel="noreferrer">
             Setup instructions
           </a>
@@ -357,7 +357,10 @@ function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAcces
         />
         {accessDenied ? <span className="access-error">Invalid Floyo API key or app access token.</span> : null}
         <button type="submit" disabled={!draftToken.trim() || isCheckingAccess}>
-          {isCheckingAccess ? "Checking..." : "Unlock FloyoGPT"}
+          {isCheckingAccess ? "Checking..." : "Continue"}
+        </button>
+        <button type="button" className="access-secondary-button" onClick={onCancel} disabled={isCheckingAccess}>
+          Cancel
         </button>
       </form>
     </div>
@@ -972,6 +975,8 @@ export default function App() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [accessVerified, setAccessVerified] = useState(false);
   const [isCheckingAccess, setIsCheckingAccess] = useState(false);
+  const [showAccessPrompt, setShowAccessPrompt] = useState(false);
+  const [pendingAccessAction, setPendingAccessAction] = useState(null);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const modelOptions = models?.length ? models : FALLBACK_MODELS;
@@ -1057,6 +1062,7 @@ export default function App() {
         loadAccountConversations(nextAccountId);
       }
       setAccessVerified(true);
+      setShowAccessPrompt(false);
       return true;
     } catch (error) {
       setAccessVerified(false);
@@ -1149,6 +1155,12 @@ export default function App() {
     [showNotice],
   );
 
+  const promptForAccess = useCallback((action) => {
+    setPendingAccessAction(action);
+    setAccessDenied(false);
+    setShowAccessPrompt(true);
+  }, []);
+
   const updateModelSelection = useCallback((model, patch = {}) => {
     setSettings((current) => ({ ...current, ...patch, model }));
     if (model === "Custom") {
@@ -1220,13 +1232,17 @@ export default function App() {
     setWorkflowPreview(null);
   }, [updateActiveMessages]);
 
-  const previewWorkflow = useCallback(async () => {
+  const previewWorkflow = useCallback(async ({ skipAccessCheck = false, promptOverride = "" } = {}) => {
     if (settings.model === "Custom" && !settings.customModelName.trim()) {
       setShowAdvanced(true);
       showNotice("Add a custom model name first.");
       return;
     }
-    const prompt = draft.trim() || "Write a concise launch plan for Floyo API integrations.";
+    if (isAccessLocked && !skipAccessCheck) {
+      promptForAccess({ type: "preview", prompt: draft.trim() });
+      return;
+    }
+    const prompt = promptOverride || draft.trim() || "Write a concise launch plan for Floyo API integrations.";
     let preview;
     try {
       preview = await apiRequest(
@@ -1243,13 +1259,16 @@ export default function App() {
       );
     } catch (error) {
       if (error.status === 401) {
+        setAccessVerified(false);
         setAccessDenied(true);
+        promptForAccess({ type: "preview" });
+        return;
       }
       throw error;
     }
     setWorkflowPreview(preview);
     setShowAdvanced(true);
-  }, [accessToken, draft, messages, requestSettings, settings.customModelName, settings.model, showNotice]);
+  }, [accessToken, draft, isAccessLocked, messages, promptForAccess, requestSettings, settings.customModelName, settings.model, showNotice]);
 
   const runFloyoPrompt = useCallback(
     async ({ prompt, history, pendingMessageId }) => {
@@ -1344,13 +1363,13 @@ export default function App() {
     [accessToken, requestSettings, updateActiveMessages],
   );
 
-  const sendMessage = useCallback(async () => {
-    const prompt = draft.trim();
+  const sendMessage = useCallback(async ({ skipAccessCheck = false, promptOverride = "" } = {}) => {
+    const prompt = promptOverride || draft.trim();
     if (!prompt || isRunning) {
       return;
     }
-    if (isAccessLocked) {
-      showNotice("Enter a Floyo API key or app access token first.");
+    if (isAccessLocked && !skipAccessCheck) {
+      promptForAccess({ type: "send", prompt });
       return;
     }
     if (settings.model === "Custom" && !settings.customModelName.trim()) {
@@ -1381,7 +1400,18 @@ export default function App() {
     setEditingText("");
     updateActiveMessages((current) => [...current, userMessage, pendingMessage], prompt);
     await runFloyoPrompt({ prompt, history, pendingMessageId: pendingMessage.id });
-  }, [draft, isAccessLocked, isRunning, messages, runFloyoPrompt, settings.customModelName, settings.model, showNotice, updateActiveMessages]);
+  }, [
+    draft,
+    isAccessLocked,
+    isRunning,
+    messages,
+    promptForAccess,
+    runFloyoPrompt,
+    settings.customModelName,
+    settings.model,
+    showNotice,
+    updateActiveMessages,
+  ]);
 
   const startEditingMessage = useCallback((message) => {
     if (isRunning) {
@@ -1397,13 +1427,13 @@ export default function App() {
   }, []);
 
   const submitEditedMessage = useCallback(
-    async (messageId) => {
+    async (messageId, { skipAccessCheck = false } = {}) => {
       const prompt = editingText.trim();
       if (!prompt || isRunning) {
         return;
       }
-      if (isAccessLocked) {
-        showNotice("Enter a Floyo API key or app access token first.");
+      if (isAccessLocked && !skipAccessCheck) {
+        promptForAccess({ type: "edit", messageId });
         return;
       }
       if (settings.model === "Custom" && !settings.customModelName.trim()) {
@@ -1449,6 +1479,7 @@ export default function App() {
       isAccessLocked,
       isRunning,
       messages,
+      promptForAccess,
       runFloyoPrompt,
       settings.customModelName,
       settings.model,
@@ -1456,6 +1487,27 @@ export default function App() {
       updateActiveMessages,
     ],
   );
+
+  useEffect(() => {
+    if (!accessVerified || !pendingAccessAction) {
+      return;
+    }
+
+    const action = pendingAccessAction;
+    setPendingAccessAction(null);
+
+    if (action.type === "send") {
+      void sendMessage({ skipAccessCheck: true, promptOverride: action.prompt || "" });
+    }
+
+    if (action.type === "preview") {
+      void previewWorkflow({ skipAccessCheck: true, promptOverride: action.prompt || "" });
+    }
+
+    if (action.type === "edit" && action.messageId) {
+      void submitEditedMessage(action.messageId, { skipAccessCheck: true });
+    }
+  }, [accessVerified, pendingAccessAction, previewWorkflow, sendMessage, submitEditedMessage]);
 
   return (
     <div className={classNames("app-shell", showAdvanced && "advanced-open")}>
@@ -1595,12 +1647,17 @@ export default function App() {
         onClose={() => setShowAdvanced(false)}
       />
 
-      {isAccessLocked ? (
+      {showAccessPrompt ? (
         <AccessGate
           accessToken={accessToken}
           accessDenied={accessDenied}
           isCheckingAccess={isCheckingAccess}
           onVerifyAccessToken={verifyAccessToken}
+          onCancel={() => {
+            setShowAccessPrompt(false);
+            setPendingAccessAction(null);
+            setAccessDenied(false);
+          }}
         />
       ) : null}
 

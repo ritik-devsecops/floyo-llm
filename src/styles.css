@@ -1501,6 +1501,12 @@ textarea:focus {
   color: #111;
 }
 
+.access-card .access-secondary-button {
+  border: 1px solid #474747;
+  background: transparent;
+  color: #e7e7e7;
+}
+
 .access-error {
   color: #ff9aa2;
   font-size: 13px;
