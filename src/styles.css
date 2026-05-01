@@ -1475,6 +1475,11 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.access-card .access-note {
+  color: #8f8f8f;
+  font-size: 13px;
+}
+
 .access-card a {
   color: #f4f4f4;
   font-weight: 760;

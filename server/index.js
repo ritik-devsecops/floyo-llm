@@ -15,9 +15,6 @@ const projectRoot = path.resolve(__dirname, "..");
 
 const app = express();
 const port = Number(process.env.PORT || 8788);
-const ACCESS_CACHE_TTL_MS = Number(process.env.ACCESS_CACHE_TTL_MS || 12 * 60 * 60 * 1000);
-const ACCESS_NEGATIVE_CACHE_TTL_MS = Number(process.env.ACCESS_NEGATIVE_CACHE_TTL_MS || 2 * 60 * 1000);
-const accessTable = new Map();
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
@@ -76,142 +73,47 @@ function providedAccessToken(request) {
   return authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
 }
 
-function readCachedAccess(fingerprint) {
-  const record = accessTable.get(fingerprint);
-  if (!record) {
-    return null;
-  }
-
-  if (record.expiresAt <= Date.now()) {
-    accessTable.delete(fingerprint);
-    return null;
-  }
-
-  record.lastUsedAt = Date.now();
-  return record;
-}
-
-function writeCachedAccess(fingerprint, patch, ttlMs = ACCESS_CACHE_TTL_MS) {
-  const now = Date.now();
-  const record = {
-    fingerprint,
-    accountId: accountIdFromFingerprint(fingerprint),
-    createdAt: now,
-    verifiedAt: now,
-    lastUsedAt: now,
-    expiresAt: now + ttlMs,
-    ...patch,
-  };
-  accessTable.set(fingerprint, record);
-  return record;
-}
-
-function toAccessResult(record, token = "") {
-  if (!record?.ok) {
-    return {
-      ok: false,
-      status: record?.status || 401,
-      message: record?.message || "Invalid access token or Floyo API key.",
-      accountId: record?.accountId,
-      cached: Boolean(record),
-    };
-  }
-
-  return {
-    ok: true,
-    mode: record.mode,
-    accountId: record.accountId,
-    cached: true,
-    expiresAt: record.expiresAt,
-    floyoContext: record.usesUserFloyoKey
-      ? {
-          apiKey: token,
-          apiBaseUrl: record.apiBaseUrl,
-        }
-      : {},
-  };
-}
-
-function cacheInvalidAccessToken(token, message = "Invalid Floyo API key.") {
-  const normalizedToken = String(token || "").trim();
-  if (!normalizedToken) {
-    return;
-  }
-
-  writeCachedAccess(
-    tokenFingerprint(normalizedToken),
-    {
-      ok: false,
-      status: 401,
-      message,
-    },
-    ACCESS_NEGATIVE_CACHE_TTL_MS,
-  );
-}
-
-function errorLooksLikeInvalidFloyoKey(error) {
-  const message =
-    typeof error?.data === "object" && error.data
-      ? String(error.data.message || error.data.error || "")
-      : String(error?.message || "");
-  return error?.status === 401 && message.toLowerCase().includes("invalid api key");
-}
-
 async function resolveAccess(token) {
   const fingerprint = tokenFingerprint(token);
-  const cachedAccess = readCachedAccess(fingerprint);
-  if (cachedAccess) {
-    return toAccessResult(cachedAccess, token);
-  }
+  const accountId = accountIdFromFingerprint(fingerprint);
 
   if (tokenMatchesExpectedAccessToken(token)) {
     if (!configuredFloyoApiKey()) {
-      const record = writeCachedAccess(
-        fingerprint,
-        {
-          ok: false,
-          status: 503,
-          message: "FLOYO_API_KEY is required before the app access token can run Floyo workflows.",
-        },
-        ACCESS_NEGATIVE_CACHE_TTL_MS,
-      );
-      return toAccessResult(record, token);
+      return {
+        ok: false,
+        status: 503,
+        message: "FLOYO_API_KEY is required before the app access token can run Floyo workflows.",
+        accountId,
+        cached: false,
+      };
     }
 
-    const record = writeCachedAccess(fingerprint, {
+    return {
       ok: true,
       mode: "app",
-      usesUserFloyoKey: false,
-    });
-    return {
-      ...toAccessResult(record, token),
+      accountId,
       cached: false,
+      floyoContext: {},
     };
   }
 
   if (tokenLooksLikeFloyoApiKey(token)) {
-    const record = writeCachedAccess(fingerprint, {
+    return {
       ok: true,
       mode: tokenMatchesConfiguredFloyoApiKey(token) ? "configured_floyo_key" : "floyo_key",
-      usesUserFloyoKey: true,
-    });
-    return {
-      ...toAccessResult(record, token),
+      accountId,
       cached: false,
+      floyoContext: {
+        apiKey: token,
+      },
     };
   }
 
-  const record = writeCachedAccess(
-    fingerprint,
-    {
-      ok: false,
-      status: 401,
-      message: "Invalid access token or Floyo API key.",
-    },
-    ACCESS_NEGATIVE_CACHE_TTL_MS,
-  );
   return {
-    ...toAccessResult(record, token),
+    ok: false,
+    status: 401,
+    message: "Invalid access token or Floyo API key.",
+    accountId,
     cached: false,
   };
 }
@@ -298,8 +200,7 @@ app.post("/api/access/verify", async (request, response, next) => {
         ok: true,
         mode: access.mode,
         accountId: access.accountId,
-        cached: access.cached,
-        expiresAt: access.expiresAt,
+        cached: false,
       });
       return;
     }
@@ -383,11 +284,7 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.use((error, request, response, _next) => {
-  if (errorLooksLikeInvalidFloyoKey(error)) {
-    cacheInvalidAccessToken(providedAccessToken(request));
-  }
-
+app.use((error, _request, response, _next) => {
   const status = error.status || (error.name === "ZodError" ? 400 : 500);
   response.status(status).json({
     error: error.name || "Error",

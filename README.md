@@ -59,12 +59,12 @@ FLOYO_API_BASE_URL=https://api-dev.floyo.ai
 APP_ACCESS_TOKEN=long_random_private_token
 ```
 
-The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment. In production, users can unlock the app with either `APP_ACCESS_TOKEN` or a valid Floyo API key. Floyo API keys are verified with a no-cost missing-run lookup before the app runs a workflow; invalid keys are rejected.
+The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment. In production, users can unlock a request with either `APP_ACCESS_TOKEN` or a Floyo API key. Floyo-shaped keys are accepted for the pending request and validated by the actual Floyo workflow call. API keys are not persisted across page refreshes.
 
 ## API Flow
 
-1. Frontend sends the token, chat, and settings to the Express server.
-2. Server verifies app access tokens locally or validates Floyo API keys against Floyo.
+1. Frontend keeps the token in memory only, then sends it with the chat and settings to the Express server.
+2. Server verifies app access tokens locally or uses the supplied Floyo API key for the current request.
 3. Server builds Floyo API workflow JSON using `LLM_floyo`.
 4. Server posts to `POST /runs` with the configured key or the verified user-provided Floyo key.
 5. Server polls `GET /runs/:id`.

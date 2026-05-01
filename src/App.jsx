@@ -37,8 +37,8 @@ import remarkGfm from "remark-gfm";
 
 const SETTINGS_STORAGE_KEY = "floyo-llm-codex-settings";
 const CONVERSATIONS_STORAGE_KEY = "floyo-llm-codex-conversations";
-const ACCESS_TOKEN_STORAGE_KEY = "floyo-llm-codex-access-token";
-const ACCESS_ACCOUNT_STORAGE_KEY = "floyo-llm-codex-access-account";
+const LEGACY_ACCESS_TOKEN_STORAGE_KEY = "floyo-llm-codex-access-token";
+const LEGACY_ACCESS_ACCOUNT_STORAGE_KEY = "floyo-llm-codex-access-account";
 const DEFAULT_ACCOUNT_ID = "guest";
 const FLOYO_ACCESS_INSTRUCTIONS_URL =
   "https://shared.archbee.space/public/PREVIEW-WejOAlhAmyJ3PP37IK_LR/PREVIEW-eANCv0feHV1nQbGY0KMmo";
@@ -257,24 +257,23 @@ function readSavedConversations(accountId = DEFAULT_ACCOUNT_ID) {
   }
 }
 
-function readSavedAccessAccount() {
+function clearSavedAccess() {
   try {
-    return localStorage.getItem(ACCESS_ACCOUNT_STORAGE_KEY) || DEFAULT_ACCOUNT_ID;
+    localStorage.removeItem(LEGACY_ACCESS_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_ACCESS_ACCOUNT_STORAGE_KEY);
   } catch {
-    return DEFAULT_ACCOUNT_ID;
+    // Access tokens are intentionally never persisted.
   }
 }
 
 function readSavedAccessToken() {
-  try {
-    return localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
+  clearSavedAccess();
+  return "";
 }
 
 function readInitialAccessState() {
-  const accountId = readSavedAccessAccount();
+  clearSavedAccess();
+  const accountId = DEFAULT_ACCOUNT_ID;
   const conversations = readSavedConversations(accountId);
   return {
     accountId,
@@ -347,6 +346,7 @@ function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAcces
             Setup instructions
           </a>
         </p>
+        <p className="access-note">Your key is used only for this browser session and is cleared when the page refreshes.</p>
         <input
           name="accessToken"
           type="password"
@@ -1015,14 +1015,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(conversationStorageKey(accessAccountId), JSON.stringify(conversations));
   }, [accessAccountId, conversations]);
-
-  useEffect(() => {
-    localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
-  }, [accessToken]);
-
-  useEffect(() => {
-    localStorage.setItem(ACCESS_ACCOUNT_STORAGE_KEY, accessAccountId || DEFAULT_ACCOUNT_ID);
-  }, [accessAccountId]);
 
   const loadAccountConversations = useCallback((accountId) => {
     const nextConversations = readSavedConversations(accountId);
