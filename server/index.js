@@ -1,6 +1,6 @@
-import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -16,8 +16,57 @@ const projectRoot = path.resolve(__dirname, "..");
 const app = express();
 const port = Number(process.env.PORT || 8788);
 
-app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+
+function expectedAccessToken() {
+  return String(process.env.APP_ACCESS_TOKEN || "").trim();
+}
+
+function timingSafeEquals(left, right) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function providedAccessToken(request) {
+  const directToken = String(request.get("x-floyo-app-token") || "").trim();
+  if (directToken) {
+    return directToken;
+  }
+
+  const authorization = String(request.get("authorization") || "").trim();
+  return authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
+}
+
+function requireAppAccess(request, response, next) {
+  const expectedToken = expectedAccessToken();
+  const shouldRequireToken = Boolean(process.env.VERCEL || process.env.NODE_ENV === "production");
+
+  if (!expectedToken) {
+    if (shouldRequireToken) {
+      response.status(503).json({
+        error: "Access token not configured",
+        message: "APP_ACCESS_TOKEN is required before the deployed API can run Floyo workflows.",
+      });
+      return;
+    }
+    next();
+    return;
+  }
+
+  if (!timingSafeEquals(providedAccessToken(request), expectedToken)) {
+    response.status(401).json({
+      error: "Unauthorized",
+      message: "Enter the app access token to run Floyo workflows.",
+    });
+    return;
+  }
+
+  next();
+}
 
 const chatSchema = z.object({
   prompt: z.string().min(1, "Prompt is required"),
@@ -49,12 +98,13 @@ const chatSchema = z.object({
 app.get("/api/config", (_request, response) => {
   response.json({
     ...getPublicConfig(),
+    requiresAccessToken: Boolean(expectedAccessToken() || process.env.VERCEL || process.env.NODE_ENV === "production"),
     defaults: DEFAULT_OPTIONS,
     models: LLM_MODELS,
   });
 });
 
-app.post("/api/workflow/preview", (request, response, next) => {
+app.post("/api/workflow/preview", requireAppAccess, (request, response, next) => {
   try {
     const parsed = chatSchema.partial({ prompt: true }).parse({
       ...request.body,
@@ -67,7 +117,7 @@ app.post("/api/workflow/preview", (request, response, next) => {
   }
 });
 
-app.post("/api/chat", async (request, response, next) => {
+app.post("/api/chat", requireAppAccess, async (request, response, next) => {
   try {
     const parsed = chatSchema.parse(request.body);
     const prompt = buildPromptFromMessages(parsed.messages, parsed.prompt);
@@ -93,7 +143,7 @@ app.post("/api/chat", async (request, response, next) => {
   }
 });
 
-app.get("/api/runs/:runId", async (request, response, next) => {
+app.get("/api/runs/:runId", requireAppAccess, async (request, response, next) => {
   try {
     const run = await retrieveRun(request.params.runId);
     const normalizedResult = await normalizeRunResult(run);
@@ -106,7 +156,7 @@ app.get("/api/runs/:runId", async (request, response, next) => {
   }
 });
 
-app.post("/api/runs/:runId/cancel", async (request, response, next) => {
+app.post("/api/runs/:runId/cancel", requireAppAccess, async (request, response, next) => {
   try {
     response.json(await cancelRun(request.params.runId));
   } catch (error) {

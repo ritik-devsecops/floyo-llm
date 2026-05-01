@@ -210,7 +210,6 @@ export async function normalizeRunResult(run) {
 
 export function getPublicConfig() {
   return {
-    apiBaseUrl: envApiBaseUrl(),
     hasApiKey: Boolean(process.env.FLOYO_API_KEY && process.env.FLOYO_API_KEY !== "YOUR_FLOYO_API_KEY"),
   };
 }

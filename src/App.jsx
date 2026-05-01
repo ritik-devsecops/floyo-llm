@@ -37,6 +37,7 @@ import remarkGfm from "remark-gfm";
 
 const SETTINGS_STORAGE_KEY = "floyo-llm-codex-settings";
 const CONVERSATIONS_STORAGE_KEY = "floyo-llm-codex-conversations";
+const ACCESS_TOKEN_STORAGE_KEY = "floyo-llm-codex-access-token";
 const LEGACY_DEFAULT_SYSTEM_PROMPT =
   "You are Floyo Codex, a precise coding and multimodal assistant. Answer directly, keep code runnable, and mention assumptions when needed.";
 
@@ -244,18 +245,29 @@ function readSavedConversations() {
   }
 }
 
-async function apiRequest(path, options = {}) {
+function readSavedAccessToken() {
+  try {
+    return localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+async function apiRequest(path, options = {}, accessToken = "") {
   const response = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { "X-Floyo-App-Token": accessToken } : {}),
       ...(options.headers || {}),
     },
   });
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || `Request failed with ${response.status}`);
+    const error = new Error(data.message || data.error || `Request failed with ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -276,6 +288,30 @@ function StatusPill({ config }) {
       {ready ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
       {ready ? "API key set" : "API key missing"}
     </span>
+  );
+}
+
+function AccessGate({ accessToken, setAccessToken, accessDenied }) {
+  return (
+    <div className="access-gate" role="dialog" aria-modal="true" aria-label="Floyo app access">
+      <form
+        className="access-card"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const formData = new FormData(event.currentTarget);
+          setAccessToken(String(formData.get("accessToken") || "").trim());
+        }}
+      >
+        <div className="access-mark">
+          <Check size={22} />
+        </div>
+        <h2>Floyo access token</h2>
+        <p>Production API protected hai. Floyo workflows run karne ke liye app access token enter karo.</p>
+        <input name="accessToken" type="password" defaultValue={accessToken} placeholder="Enter app access token" autoFocus />
+        {accessDenied ? <span className="access-error">Token invalid hai. Correct token try karo.</span> : null}
+        <button type="submit">Unlock FloyoGPT</button>
+      </form>
+    </div>
   );
 }
 
@@ -746,7 +782,7 @@ function AdvancedPanel({
       <div className="panel-head">
         <div>
           <h2>Advanced</h2>
-          <p>{config?.apiBaseUrl || "Loading API"}</p>
+          <p>{config?.hasApiKey ? "Server-side Floyo API" : "API key missing"}</p>
         </div>
         <button type="button" className="icon-button" onClick={onClose} title="Close advanced settings">
           <X size={16} />
@@ -881,6 +917,8 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
   const [editingText, setEditingText] = useState("");
+  const [accessToken, setAccessToken] = useState(readSavedAccessToken);
+  const [accessDenied, setAccessDenied] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const modelOptions = models?.length ? models : FALLBACK_MODELS;
@@ -895,6 +933,8 @@ export default function App() {
     [messages],
   );
   const isEmptyChat = visibleMessages.length === 0;
+  const requiresAccessToken = Boolean(config?.requiresAccessToken);
+  const isAccessLocked = requiresAccessToken && (!accessToken.trim() || accessDenied);
 
   useEffect(() => {
     apiRequest("/api/config")
@@ -917,6 +957,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
   }, [conversations]);
+
+  useEffect(() => {
+    localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+    setAccessDenied(false);
+  }, [accessToken]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1025,17 +1070,29 @@ export default function App() {
       return;
     }
     const prompt = draft.trim() || "Write a concise launch plan for Floyo API integrations.";
-    const preview = await apiRequest("/api/workflow/preview", {
-      method: "POST",
-      body: JSON.stringify({
-        prompt,
-        messages: messages.filter((message) => message.id !== "seed" && !message.loading),
-        options: requestSettings,
-      }),
-    });
+    let preview;
+    try {
+      preview = await apiRequest(
+        "/api/workflow/preview",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            prompt,
+            messages: messages.filter((message) => message.id !== "seed" && !message.loading),
+            options: requestSettings,
+          }),
+        },
+        accessToken,
+      );
+    } catch (error) {
+      if (error.status === 401) {
+        setAccessDenied(true);
+      }
+      throw error;
+    }
     setWorkflowPreview(preview);
     setShowAdvanced(true);
-  }, [draft, messages, requestSettings, settings.customModelName, settings.model, showNotice]);
+  }, [accessToken, draft, messages, requestSettings, settings.customModelName, settings.model, showNotice]);
 
   const runFloyoPrompt = useCallback(
     async ({ prompt, history, pendingMessageId }) => {
@@ -1055,16 +1112,20 @@ export default function App() {
     }, 900);
 
     try {
-      const result = await apiRequest("/api/chat", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt,
-          messages: history,
-          options: requestSettings,
-          waitForCompletion: true,
-          pollTimeoutMs: 180000,
-        }),
-      });
+      const result = await apiRequest(
+        "/api/chat",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            prompt,
+            messages: history,
+            options: requestSettings,
+            waitForCompletion: true,
+            pollTimeoutMs: 180000,
+          }),
+        },
+        accessToken,
+      );
 
       window.clearTimeout(processingTimer);
       const answer = result.answer || "No text response was returned.";
@@ -1101,6 +1162,9 @@ export default function App() {
       );
     } catch (error) {
       window.clearTimeout(processingTimer);
+      if (error.status === 401) {
+        setAccessDenied(true);
+      }
       updateActiveMessages((current) =>
         current.map((message) =>
           message.id === pendingMessageId
@@ -1119,12 +1183,16 @@ export default function App() {
       inputRef.current?.focus();
     }
     },
-    [requestSettings, updateActiveMessages],
+    [accessToken, requestSettings, updateActiveMessages],
   );
 
   const sendMessage = useCallback(async () => {
     const prompt = draft.trim();
     if (!prompt || isRunning) {
+      return;
+    }
+    if (isAccessLocked) {
+      showNotice("Enter the app access token first.");
       return;
     }
     if (settings.model === "Custom" && !settings.customModelName.trim()) {
@@ -1155,7 +1223,7 @@ export default function App() {
     setEditingText("");
     updateActiveMessages((current) => [...current, userMessage, pendingMessage], prompt);
     await runFloyoPrompt({ prompt, history, pendingMessageId: pendingMessage.id });
-  }, [draft, isRunning, messages, runFloyoPrompt, settings.customModelName, settings.model, showNotice, updateActiveMessages]);
+  }, [draft, isAccessLocked, isRunning, messages, runFloyoPrompt, settings.customModelName, settings.model, showNotice, updateActiveMessages]);
 
   const startEditingMessage = useCallback((message) => {
     if (isRunning) {
@@ -1174,6 +1242,10 @@ export default function App() {
     async (messageId) => {
       const prompt = editingText.trim();
       if (!prompt || isRunning) {
+        return;
+      }
+      if (isAccessLocked) {
+        showNotice("Enter the app access token first.");
         return;
       }
       if (settings.model === "Custom" && !settings.customModelName.trim()) {
@@ -1216,6 +1288,7 @@ export default function App() {
     },
     [
       editingText,
+      isAccessLocked,
       isRunning,
       messages,
       runFloyoPrompt,
@@ -1363,6 +1436,10 @@ export default function App() {
         onCopy={handleCopy}
         onClose={() => setShowAdvanced(false)}
       />
+
+      {isAccessLocked ? (
+        <AccessGate accessToken={accessToken} setAccessToken={setAccessToken} accessDenied={accessDenied} />
+      ) : null}
 
       {notice ? <div className="toast">{notice}</div> : null}
     </div>

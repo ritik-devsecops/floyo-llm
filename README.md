@@ -15,6 +15,7 @@ Add your key in `.env`:
 ```bash
 FLOYO_API_KEY=your_key_here
 FLOYO_API_BASE_URL=https://api-dev.floyo.ai
+APP_ACCESS_TOKEN=long_random_private_token
 PORT=8788
 ```
 
@@ -55,9 +56,10 @@ Set these environment variables in Vercel before production use:
 ```bash
 FLOYO_API_KEY=your_key_here
 FLOYO_API_BASE_URL=https://api-dev.floyo.ai
+APP_ACCESS_TOKEN=long_random_private_token
 ```
 
-The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment.
+The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment. In production, `APP_ACCESS_TOKEN` is required for workflow-running endpoints so the server-side Floyo key cannot be abused through the public app.
 
 ## API Flow
 
