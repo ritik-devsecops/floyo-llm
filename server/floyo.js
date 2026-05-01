@@ -1,13 +1,18 @@
 const DONE_STATUSES = new Set(["done", "failed", "cancelled"]);
 const TEXT_MIME_PREFIXES = ["text/", "application/json"];
 const TEXT_FILE_EXTENSIONS = [".txt", ".json", ".md", ".csv", ".log"];
+const RUN_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 
 function envApiBaseUrl() {
   return (process.env.FLOYO_API_BASE_URL || "https://api.floyo.ai").replace(/\/+$/, "");
 }
 
-function authHeaders() {
-  const apiKey = process.env.FLOYO_API_KEY;
+function normalizeApiBaseUrl(apiBaseUrl = "") {
+  return (apiBaseUrl || envApiBaseUrl()).replace(/\/+$/, "");
+}
+
+function authHeaders(apiKeyOverride = "") {
+  const apiKey = apiKeyOverride || process.env.FLOYO_API_KEY;
   if (!apiKey || apiKey === "YOUR_FLOYO_API_KEY") {
     const error = new Error("FLOYO_API_KEY is missing. Copy .env.example to .env and add your API key.");
     error.status = 500;
@@ -20,6 +25,18 @@ function authHeaders() {
   };
 }
 
+function candidateApiBaseUrls() {
+  return [...new Set([envApiBaseUrl(), "https://api.floyo.ai", "https://api-dev.floyo.ai"].map(normalizeApiBaseUrl))];
+}
+
+function createAccessProbeRunId() {
+  let suffix = "";
+  for (let index = 0; index < 16; index += 1) {
+    suffix += RUN_ID_ALPHABET[Math.floor(Math.random() * RUN_ID_ALPHABET.length)];
+  }
+  return `run_${suffix}`;
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -28,11 +45,11 @@ async function parseResponse(response) {
   return response.text();
 }
 
-async function floyoRequest(path, options = {}) {
-  const response = await fetch(`${envApiBaseUrl()}${path}`, {
+async function floyoRequest(path, options = {}, context = {}) {
+  const response = await fetch(`${normalizeApiBaseUrl(context.apiBaseUrl)}${path}`, {
     ...options,
     headers: {
-      ...authHeaders(),
+      ...authHeaders(context.apiKey),
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     },
@@ -53,32 +70,79 @@ async function floyoRequest(path, options = {}) {
   return data;
 }
 
-export async function createRun(payload) {
+function getResponseMessage(data) {
+  if (typeof data === "object" && data) {
+    return String(data.message || data.error || JSON.stringify(data));
+  }
+  return String(data || "");
+}
+
+async function probeApiKeyOnBase(apiKey, apiBaseUrl) {
+  const response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}/runs/${createAccessProbeRunId()}`, {
+    headers: {
+      ...authHeaders(apiKey),
+    },
+  });
+  const data = await parseResponse(response);
+  const message = getResponseMessage(data).toLowerCase();
+
+  if (response.status === 401 || response.status === 403 || message.includes("invalid api key")) {
+    return { ok: false };
+  }
+
+  if (response.status === 200 || response.status === 404 || message.includes("run not found")) {
+    return { ok: true, apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl) };
+  }
+
+  return { ok: false };
+}
+
+export async function validateFloyoApiKey(apiKey) {
+  const token = String(apiKey || "").trim();
+  if (!token.startsWith("flo_")) {
+    return { ok: false };
+  }
+
+  for (const apiBaseUrl of candidateApiBaseUrls()) {
+    try {
+      const result = await probeApiKeyOnBase(token, apiBaseUrl);
+      if (result.ok) {
+        return result;
+      }
+    } catch {
+      // Try the next known Floyo API base URL.
+    }
+  }
+
+  return { ok: false };
+}
+
+export async function createRun(payload, context = {}) {
   return floyoRequest("/runs", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, context);
 }
 
-export async function retrieveRun(runId, { expandOutputs = true, presignedUrlExpiresIn = 600 } = {}) {
+export async function retrieveRun(runId, { expandOutputs = true, presignedUrlExpiresIn = 600, apiKey = "", apiBaseUrl = "" } = {}) {
   void expandOutputs;
   void presignedUrlExpiresIn;
-  return floyoRequest(`/runs/${encodeURIComponent(runId)}`);
+  return floyoRequest(`/runs/${encodeURIComponent(runId)}`, {}, { apiKey, apiBaseUrl });
 }
 
-export async function cancelRun(runId) {
+export async function cancelRun(runId, context = {}) {
   return floyoRequest(`/runs/${encodeURIComponent(runId)}/cancel`, {
     method: "POST",
-  });
+  }, context);
 }
 
-export async function pollRun(runId, { timeoutMs = 180000, intervalMs = 1600 } = {}) {
+export async function pollRun(runId, { timeoutMs = 180000, intervalMs = 1600, apiKey = "", apiBaseUrl = "" } = {}) {
   const startedAt = Date.now();
-  let latestRun = await retrieveRun(runId);
+  let latestRun = await retrieveRun(runId, { apiKey, apiBaseUrl });
 
   while (!DONE_STATUSES.has(latestRun.status) && Date.now() - startedAt < timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    latestRun = await retrieveRun(runId);
+    latestRun = await retrieveRun(runId, { apiKey, apiBaseUrl });
   }
 
   return latestRun;
@@ -106,7 +170,7 @@ function isTextOutput(output = {}) {
   );
 }
 
-async function fetchTextOutput(output) {
+async function fetchTextOutput(output, context = {}) {
   if (!isTextOutput(output)) {
     return "";
   }
@@ -116,7 +180,7 @@ async function fetchTextOutput(output) {
     const fileId = output.id;
     let resolvedUrl = url;
     if (!resolvedUrl && fileId) {
-      const fileMetadata = await floyoRequest(`/files/${encodeURIComponent(fileId)}?expand=presigned_url`);
+      const fileMetadata = await floyoRequest(`/files/${encodeURIComponent(fileId)}?expand=presigned_url`, {}, context);
       resolvedUrl = fileMetadata.presigned_url || fileMetadata["presigned url"];
     }
     const response = url
@@ -175,7 +239,7 @@ function extractStructuredText(run) {
   return "";
 }
 
-export async function normalizeRunResult(run) {
+export async function normalizeRunResult(run, context = {}) {
   const outputs = Array.isArray(run?.outputs) ? run.outputs : [];
   const outputTexts = [];
 
@@ -186,7 +250,7 @@ export async function normalizeRunResult(run) {
       continue;
     }
 
-    const fileText = await fetchTextOutput(output);
+    const fileText = await fetchTextOutput(output, context);
     if (fileText) {
       outputTexts.push(fileText);
     }

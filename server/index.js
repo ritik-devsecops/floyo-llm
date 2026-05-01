@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { buildLLMWorkflow, buildPromptFromMessages, DEFAULT_OPTIONS, LLM_MODELS, normalizeOptions } from "./workflow.js";
-import { cancelRun, createRun, getPublicConfig, normalizeRunResult, pollRun, retrieveRun } from "./floyo.js";
+import { cancelRun, createRun, getPublicConfig, normalizeRunResult, pollRun, retrieveRun, validateFloyoApiKey } from "./floyo.js";
 
 dotenv.config();
 
@@ -42,10 +42,6 @@ function tokenMatchesConfiguredFloyoApiKey(token) {
   return Boolean(apiKey && timingSafeEquals(token, apiKey));
 }
 
-function tokenIsAllowed(token) {
-  return tokenMatchesExpectedAccessToken(token) || tokenMatchesConfiguredFloyoApiKey(token);
-}
-
 function timingSafeEquals(left, right) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -65,32 +61,59 @@ function providedAccessToken(request) {
   return authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
 }
 
-function requireAppAccess(request, response, next) {
-  const shouldRequireToken = Boolean(process.env.VERCEL || process.env.NODE_ENV === "production");
-  const hasConfiguredAccess = Boolean(expectedAccessToken() || configuredFloyoApiKey());
-  const token = providedAccessToken(request);
-
-  if (!hasConfiguredAccess) {
-    if (shouldRequireToken) {
-      response.status(503).json({
-        error: "Access token not configured",
-        message: "APP_ACCESS_TOKEN or a Floyo API key is required before the deployed API can run Floyo workflows.",
-      });
-      return;
+async function resolveAccess(token) {
+  if (tokenMatchesExpectedAccessToken(token)) {
+    if (!configuredFloyoApiKey()) {
+      return {
+        ok: false,
+        status: 503,
+        message: "FLOYO_API_KEY is required before the app access token can run Floyo workflows.",
+      };
     }
-    next();
-    return;
+    return { ok: true, mode: "app", floyoContext: {} };
   }
 
-  if (!token || !tokenIsAllowed(token)) {
+  const validation = await validateFloyoApiKey(token);
+  if (validation.ok) {
+    return {
+      ok: true,
+      mode: tokenMatchesConfiguredFloyoApiKey(token) ? "configured_floyo_key" : "floyo_key",
+      floyoContext: {
+        apiKey: token,
+        apiBaseUrl: validation.apiBaseUrl,
+      },
+    };
+  }
+
+  return { ok: false, status: 401, message: "Invalid access token or Floyo API key." };
+}
+
+async function requireAppAccess(request, response, next) {
+  const token = providedAccessToken(request);
+
+  if (!token) {
     response.status(401).json({
       error: "Unauthorized",
-      message: token ? "Invalid access token." : "Enter the app access token to run Floyo workflows.",
+      message: "Enter a Floyo API key or app access token.",
     });
     return;
   }
 
-  next();
+  try {
+    const access = await resolveAccess(token);
+    if (!access.ok) {
+      response.status(access.status || 401).json({
+        error: access.status === 503 ? "Access token not configured" : "Unauthorized",
+        message: access.message,
+      });
+      return;
+    }
+
+    request.floyoContext = access.floyoContext;
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 const chatSchema = z.object({
@@ -135,19 +158,20 @@ app.post("/api/access/verify", async (request, response, next) => {
     if (!token) {
       response.status(401).json({
         error: "Unauthorized",
-        message: "Enter the app access token to run Floyo workflows.",
+        message: "Enter a Floyo API key or app access token.",
       });
       return;
     }
 
-    if (tokenIsAllowed(token)) {
-      response.json({ ok: true });
+    const access = await resolveAccess(token);
+    if (access.ok) {
+      response.json({ ok: true, mode: access.mode });
       return;
     }
 
-    response.status(401).json({
-      error: "Unauthorized",
-      message: "Invalid access token.",
+    response.status(access.status || 401).json({
+      error: access.status === 503 ? "Access token not configured" : "Unauthorized",
+      message: access.message,
     });
   } catch (error) {
     next(error);
@@ -176,12 +200,13 @@ app.post("/api/chat", requireAppAccess, async (request, response, next) => {
       options: normalizeOptions(parsed.options),
     });
 
-    const run = await createRun(workflowPayload);
+    const floyoContext = request.floyoContext || {};
+    const run = await createRun(workflowPayload, floyoContext);
     const shouldWait = parsed.waitForCompletion ?? true;
     const finalRun = shouldWait
-      ? await pollRun(run.id, { timeoutMs: parsed.pollTimeoutMs || 180000 })
-      : await retrieveRun(run.id);
-    const normalizedResult = await normalizeRunResult(finalRun);
+      ? await pollRun(run.id, { timeoutMs: parsed.pollTimeoutMs || 180000, ...floyoContext })
+      : await retrieveRun(run.id, floyoContext);
+    const normalizedResult = await normalizeRunResult(finalRun, floyoContext);
 
     response.json({
       runId: run.id,
@@ -195,8 +220,9 @@ app.post("/api/chat", requireAppAccess, async (request, response, next) => {
 
 app.get("/api/runs/:runId", requireAppAccess, async (request, response, next) => {
   try {
-    const run = await retrieveRun(request.params.runId);
-    const normalizedResult = await normalizeRunResult(run);
+    const floyoContext = request.floyoContext || {};
+    const run = await retrieveRun(request.params.runId, floyoContext);
+    const normalizedResult = await normalizeRunResult(run, floyoContext);
     response.json({
       runId: request.params.runId,
       ...normalizedResult,
@@ -208,7 +234,7 @@ app.get("/api/runs/:runId", requireAppAccess, async (request, response, next) =>
 
 app.post("/api/runs/:runId/cancel", requireAppAccess, async (request, response, next) => {
   try {
-    response.json(await cancelRun(request.params.runId));
+    response.json(await cancelRun(request.params.runId, request.floyoContext || {}));
   } catch (error) {
     next(error);
   }

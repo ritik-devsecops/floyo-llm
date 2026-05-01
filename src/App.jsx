@@ -314,7 +314,7 @@ function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAcces
         </div>
         <h2>FloyoGPT access</h2>
         <p>
-          To use FloyoGPT, generate an app access token from the Floyo panel, then enter it here.{" "}
+          To use FloyoGPT, enter a valid Floyo API key or app access token. Generate a Floyo API key from the Floyo panel.{" "}
           <a href={FLOYO_ACCESS_INSTRUCTIONS_URL} target="_blank" rel="noreferrer">
             Setup instructions
           </a>
@@ -323,11 +323,11 @@ function AccessGate({ accessToken, accessDenied, isCheckingAccess, onVerifyAcces
           name="accessToken"
           type="password"
           value={draftToken}
-          placeholder="Enter access token"
+          placeholder="Enter Floyo API key or app access token"
           onChange={(event) => setDraftToken(event.target.value)}
           autoFocus
         />
-        {accessDenied ? <span className="access-error">Invalid token. Check the token and try again.</span> : null}
+        {accessDenied ? <span className="access-error">Invalid Floyo API key or app access token.</span> : null}
         <button type="submit" disabled={!draftToken.trim() || isCheckingAccess}>
           {isCheckingAccess ? "Checking..." : "Unlock FloyoGPT"}
         </button>
@@ -1295,7 +1295,7 @@ export default function App() {
       return;
     }
     if (isAccessLocked) {
-      showNotice("Enter the app access token first.");
+      showNotice("Enter a Floyo API key or app access token first.");
       return;
     }
     if (settings.model === "Custom" && !settings.customModelName.trim()) {
@@ -1348,7 +1348,7 @@ export default function App() {
         return;
       }
       if (isAccessLocked) {
-        showNotice("Enter the app access token first.");
+        showNotice("Enter a Floyo API key or app access token first.");
         return;
       }
       if (settings.model === "Custom" && !settings.customModelName.trim()) {

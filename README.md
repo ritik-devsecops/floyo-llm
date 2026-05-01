@@ -10,7 +10,7 @@ npm install
 cp .env.example .env
 ```
 
-Add your key in `.env`:
+Add your default server key in `.env`:
 
 ```bash
 FLOYO_API_KEY=your_key_here
@@ -59,12 +59,13 @@ FLOYO_API_BASE_URL=https://api-dev.floyo.ai
 APP_ACCESS_TOKEN=long_random_private_token
 ```
 
-The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment. In production, `APP_ACCESS_TOKEN` is required for workflow-running endpoints so the server-side Floyo key cannot be abused through the public app.
+The app includes Vercel serverless API wrappers under `api/`, so the frontend can call `/api/chat`, `/api/config`, and run status endpoints after deployment. In production, users can unlock the app with either `APP_ACCESS_TOKEN` or a valid Floyo API key. Floyo API keys are verified with a no-cost missing-run lookup before the app runs a workflow; invalid keys are rejected.
 
 ## API Flow
 
-1. Frontend sends chat + settings to the local Express server.
-2. Server builds Floyo API workflow JSON using `LLM_floyo`.
-3. Server posts to `POST /runs`.
-4. Server polls `GET /runs/:id`.
-5. Server returns status, text candidates, outputs, raw run data, and the generated workflow JSON.
+1. Frontend sends the token, chat, and settings to the Express server.
+2. Server verifies app access tokens locally or validates Floyo API keys against Floyo.
+3. Server builds Floyo API workflow JSON using `LLM_floyo`.
+4. Server posts to `POST /runs` with the configured key or the verified user-provided Floyo key.
+5. Server polls `GET /runs/:id`.
+6. Server returns status, text candidates, outputs, raw run data, and the generated workflow JSON.
