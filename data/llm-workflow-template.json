@@ -1,0 +1,34 @@
+{
+  "name": "LLM-Floyo",
+  "workflow": {
+    "53": {
+      "inputs": {
+        "prompt": "Write Python code for a centered star pyramid.",
+        "model": "anthropic/claude-opus-4.6",
+        "system_prompt": "You are Floyo LLM, a precise coding and writing assistant. Answer in clean Markdown. Put runnable code in fenced code blocks with the correct language label.",
+        "temperature": 1,
+        "reasoning": true,
+        "max_tokens": 0,
+        "custom_model_name": ""
+      },
+      "class_type": "LLM_floyo",
+      "_meta": {
+        "title": "LLM (Floyo API)"
+      }
+    },
+    "56": {
+      "inputs": {
+        "video_url": [
+          "53",
+          0
+        ],
+        "filename": "floyo_llm_answer",
+        "output_dir": ""
+      },
+      "class_type": "SaveVideoURL",
+      "_meta": {
+        "title": "Save LLM Answer"
+      }
+    }
+  }
+}

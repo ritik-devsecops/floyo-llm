@@ -1,0 +1,40 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Floyo robo avatar</title>
+  <desc id="desc">A purple Floyo robot mascot with a black visor and yellow cape on a transparent background.</desc>
+  <g filter="url(#softShadow)">
+    <path d="M42 92C30 97 23 109 17 125C16 128 18 130 21 129C33 126 45 119 53 110L42 92Z" fill="#FFE91F" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M118 92C130 97 137 109 143 125C144 128 142 130 139 129C127 126 115 119 107 110L118 92Z" fill="#FFE91F" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M55 52C52 39 49 23 51 15C53 8 59 8 64 14C70 23 73 38 75 51L55 52Z" fill="url(#purpleBody)" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M64 48C61 36 59 24 60 18C62 23 66 35 68 48H64Z" fill="#F4D4FF" stroke="#140B20" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M105 52C108 39 111 23 109 15C107 8 101 8 96 14C90 23 87 38 85 51L105 52Z" fill="url(#purpleBody)" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M96 48C99 36 101 24 100 18C98 23 94 35 92 48H96Z" fill="#F4D4FF" stroke="#140B20" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M51 84C42 85 35 93 34 103L33 121C32 134 43 145 56 145H104C117 145 128 134 127 121L126 103C125 93 118 85 109 84H51Z" fill="#E8CCFF" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M52 120C48 120 44 123 43 127L39 137C37 143 41 149 48 149H58C64 149 68 145 68 139V130C68 124 63 120 57 120H52Z" fill="#B565F1" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M108 120C112 120 116 123 117 127L121 137C123 143 119 149 112 149H102C96 149 92 145 92 139V130C92 124 97 120 103 120H108Z" fill="#B565F1" stroke="#140B20" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M57 85C51 91 48 101 50 113L51 120" stroke="#140B20" stroke-width="4" stroke-linecap="round"/>
+    <path d="M103 85C109 91 112 101 110 113L109 120" stroke="#140B20" stroke-width="4" stroke-linecap="round"/>
+    <path d="M66 104H94C99 104 102 107 102 112V123C102 128 99 131 94 131H66C61 131 58 128 58 123V112C58 107 61 104 66 104Z" fill="url(#purplePanel)" stroke="#140B20" stroke-width="4"/>
+    <path d="M48 42H112C126 42 137 53 137 67V85C137 99 126 110 112 110H48C34 110 23 99 23 85V67C23 53 34 42 48 42Z" fill="url(#purpleBody)" stroke="#140B20" stroke-width="4"/>
+    <path d="M32 63C32 54 39 48 48 48H112C121 48 128 54 128 63V82C128 91 121 98 112 98H48C39 98 32 91 32 82V63Z" fill="#0E0419"/>
+    <path d="M30 76C23 76 18 81 18 88C18 95 23 100 30 100H33V76H30Z" fill="#140B20"/>
+    <path d="M130 76C137 76 142 81 142 88C142 95 137 100 130 100H127V76H130Z" fill="#140B20"/>
+    <path d="M67 65V83" stroke="#F7D8FF" stroke-width="5" stroke-linecap="round"/>
+    <path d="M93 65V83" stroke="#F7D8FF" stroke-width="5" stroke-linecap="round"/>
+    <path d="M54 144C63 146 71 146 80 144" stroke="#140B20" stroke-width="3" stroke-linecap="round"/>
+    <path d="M80 144C89 146 97 146 106 144" stroke="#140B20" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <defs>
+    <filter id="softShadow" x="6" y="4" width="148" height="154" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+    <linearGradient id="purpleBody" x1="30" y1="25" x2="126" y2="135" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D580FF"/>
+      <stop offset="0.48" stop-color="#B95DF0"/>
+      <stop offset="1" stop-color="#F1DBFF"/>
+    </linearGradient>
+    <linearGradient id="purplePanel" x1="58" y1="103" x2="103" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3C7FF"/>
+      <stop offset="1" stop-color="#A94CEB"/>
+    </linearGradient>
+  </defs>
+</svg>
