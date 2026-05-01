@@ -1,8 +1,6 @@
 const DONE_STATUSES = new Set(["done", "failed", "cancelled"]);
 const TEXT_MIME_PREFIXES = ["text/", "application/json"];
 const TEXT_FILE_EXTENSIONS = [".txt", ".json", ".md", ".csv", ".log"];
-const RUN_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
-
 function envApiBaseUrl() {
   return (process.env.FLOYO_API_BASE_URL || "https://api.floyo.ai").replace(/\/+$/, "");
 }
@@ -29,14 +27,6 @@ function candidateApiBaseUrls() {
   return [...new Set([envApiBaseUrl(), "https://api.floyo.ai", "https://api-dev.floyo.ai"].map(normalizeApiBaseUrl))];
 }
 
-function createAccessProbeRunId() {
-  let suffix = "";
-  for (let index = 0; index < 16; index += 1) {
-    suffix += RUN_ID_ALPHABET[Math.floor(Math.random() * RUN_ID_ALPHABET.length)];
-  }
-  return `run_${suffix}`;
-}
-
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -45,29 +35,61 @@ async function parseResponse(response) {
   return response.text();
 }
 
-async function floyoRequest(path, options = {}, context = {}) {
-  const response = await fetch(`${normalizeApiBaseUrl(context.apiBaseUrl)}${path}`, {
-    ...options,
-    headers: {
-      ...authHeaders(context.apiKey),
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const data = await parseResponse(response);
+function buildFloyoError(response, data) {
+  const message =
+    typeof data === "object" && data
+      ? data.message || data.error || JSON.stringify(data)
+      : String(data || response.statusText);
+  const error = new Error(`Floyo API ${response.status}: ${message}`);
+  error.status = response.status;
+  error.data = data;
+  return error;
+}
 
-  if (!response.ok) {
-    const message =
-      typeof data === "object" && data
-        ? data.message || data.error || JSON.stringify(data)
-        : String(data || response.statusText);
-    const error = new Error(`Floyo API ${response.status}: ${message}`);
-    error.status = response.status;
-    error.data = data;
+function isInvalidApiKeyResponse(error) {
+  const message = getResponseMessage(error?.data).toLowerCase();
+  return error?.status === 401 || error?.status === 403 || message.includes("invalid api key");
+}
+
+function requestBaseUrls(context = {}) {
+  if (context.apiBaseUrl) {
+    return [normalizeApiBaseUrl(context.apiBaseUrl)];
+  }
+  if (context.apiKey) {
+    return candidateApiBaseUrls();
+  }
+  return [envApiBaseUrl()];
+}
+
+async function floyoRequest(path, options = {}, context = {}) {
+  let lastAuthError = null;
+
+  for (const apiBaseUrl of requestBaseUrls(context)) {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      headers: {
+        ...authHeaders(context.apiKey),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
+    const data = await parseResponse(response);
+
+    if (response.ok) {
+      context.apiBaseUrl = apiBaseUrl;
+      return data;
+    }
+
+    const error = buildFloyoError(response, data);
+    if (context.apiKey && !context.apiBaseUrl && isInvalidApiKeyResponse(error)) {
+      lastAuthError = error;
+      continue;
+    }
+
     throw error;
   }
 
-  return data;
+  throw lastAuthError || new Error("Floyo API request failed.");
 }
 
 function getResponseMessage(data) {
@@ -75,45 +97,6 @@ function getResponseMessage(data) {
     return String(data.message || data.error || JSON.stringify(data));
   }
   return String(data || "");
-}
-
-async function probeApiKeyOnBase(apiKey, apiBaseUrl) {
-  const response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}/runs/${createAccessProbeRunId()}`, {
-    headers: {
-      ...authHeaders(apiKey),
-    },
-  });
-  const data = await parseResponse(response);
-  const message = getResponseMessage(data).toLowerCase();
-
-  if (response.status === 401 || response.status === 403 || message.includes("invalid api key")) {
-    return { ok: false };
-  }
-
-  if (response.status === 200 || response.status === 404 || message.includes("run not found")) {
-    return { ok: true, apiBaseUrl: normalizeApiBaseUrl(apiBaseUrl) };
-  }
-
-  return { ok: false };
-}
-
-export async function validateFloyoApiKey(apiKey) {
-  const token = String(apiKey || "").trim();
-  if (!token.startsWith("flo_")) {
-    return { ok: false };
-  }
-
-  const results = await Promise.allSettled(
-    candidateApiBaseUrls().map((apiBaseUrl) => probeApiKeyOnBase(token, apiBaseUrl)),
-  );
-
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.ok) {
-      return result.value;
-    }
-  }
-
-  return { ok: false };
 }
 
 export async function createRun(payload, context = {}) {

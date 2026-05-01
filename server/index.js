@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { buildLLMWorkflow, buildPromptFromMessages, DEFAULT_OPTIONS, LLM_MODELS, normalizeOptions } from "./workflow.js";
-import { cancelRun, createRun, getPublicConfig, normalizeRunResult, pollRun, retrieveRun, validateFloyoApiKey } from "./floyo.js";
+import { cancelRun, createRun, getPublicConfig, normalizeRunResult, pollRun, retrieveRun } from "./floyo.js";
 
 dotenv.config();
 
@@ -51,6 +51,10 @@ function tokenMatchesExpectedAccessToken(token) {
 function tokenMatchesConfiguredFloyoApiKey(token) {
   const apiKey = configuredFloyoApiKey();
   return Boolean(apiKey && timingSafeEquals(token, apiKey));
+}
+
+function tokenLooksLikeFloyoApiKey(token) {
+  return String(token || "").trim().startsWith("flo_");
 }
 
 function timingSafeEquals(left, right) {
@@ -128,6 +132,31 @@ function toAccessResult(record, token = "") {
   };
 }
 
+function cacheInvalidAccessToken(token, message = "Invalid Floyo API key.") {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return;
+  }
+
+  writeCachedAccess(
+    tokenFingerprint(normalizedToken),
+    {
+      ok: false,
+      status: 401,
+      message,
+    },
+    ACCESS_NEGATIVE_CACHE_TTL_MS,
+  );
+}
+
+function errorLooksLikeInvalidFloyoKey(error) {
+  const message =
+    typeof error?.data === "object" && error.data
+      ? String(error.data.message || error.data.error || "")
+      : String(error?.message || "");
+  return error?.status === 401 && message.toLowerCase().includes("invalid api key");
+}
+
 async function resolveAccess(token) {
   const fingerprint = tokenFingerprint(token);
   const cachedAccess = readCachedAccess(fingerprint);
@@ -160,13 +189,11 @@ async function resolveAccess(token) {
     };
   }
 
-  const validation = await validateFloyoApiKey(token);
-  if (validation.ok) {
+  if (tokenLooksLikeFloyoApiKey(token)) {
     const record = writeCachedAccess(fingerprint, {
       ok: true,
       mode: tokenMatchesConfiguredFloyoApiKey(token) ? "configured_floyo_key" : "floyo_key",
       usesUserFloyoKey: true,
-      apiBaseUrl: validation.apiBaseUrl,
     });
     return {
       ...toAccessResult(record, token),
@@ -356,7 +383,11 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.use((error, _request, response, _next) => {
+app.use((error, request, response, _next) => {
+  if (errorLooksLikeInvalidFloyoKey(error)) {
+    cacheInvalidAccessToken(providedAccessToken(request));
+  }
+
   const status = error.status || (error.name === "ZodError" ? 400 : 500);
   response.status(status).json({
     error: error.name || "Error",
